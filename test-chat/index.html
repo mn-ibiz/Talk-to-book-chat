@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Talk2Publish - Test Chat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
+            background: #f5f5f5;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .chat-container {
+            width: 100%;
+            max-width: 800px;
+            height: 90vh;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .chat-header h1 {
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .chat-header p {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-top: 4px;
+        }
+
+        .thread-info {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+            word-break: break-all;
+        }
+
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #fafafa;
+        }
+
+        .message {
+            margin-bottom: 16px;
+            display: flex;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message.assistant {
+            justify-content: flex-start;
+        }
+
+        .message-bubble {
+            max-width: 75%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-bubble {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant .message-bubble {
+            background: white;
+            color: #333;
+            border-bottom-left-radius: 4px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        .message-meta {
+            font-size: 11px;
+            opacity: 0.7;
+            margin-top: 4px;
+        }
+
+        .agent-badge {
+            display: inline-block;
+            background: rgba(0, 0, 0, 0.1);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .streaming-indicator {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            background: white;
+            border-radius: 18px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+            max-width: 200px;
+        }
+
+        .streaming-indicator.active {
+            display: flex;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .typing-dots span {
+            width: 8px;
+            height: 8px;
+            background: #667eea;
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% {
+                transform: translateY(0);
+                opacity: 0.5;
+            }
+            30% {
+                transform: translateY(-10px);
+                opacity: 1;
+            }
+        }
+
+        .input-container {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e5e5e5;
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        #messageInput {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e5e5e5;
+            border-radius: 24px;
+            font-size: 15px;
+            font-family: inherit;
+            resize: none;
+            max-height: 120px;
+            transition: border-color 0.2s;
+        }
+
+        #messageInput:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        #sendButton {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 24px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            min-width: 80px;
+        }
+
+        #sendButton:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        #sendButton:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status-message {
+            text-align: center;
+            padding: 12px;
+            margin: 20px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .status-message.error {
+            background: #fee;
+            color: #c33;
+            border: 1px solid #fcc;
+        }
+
+        .status-message.info {
+            background: #e3f2fd;
+            color: #1976d2;
+            border: 1px solid #bbdefb;
+        }
+
+        .controls {
+            display: flex;
+            gap: 8px;
+            padding: 10px 20px;
+            background: white;
+            border-bottom: 1px solid #e5e5e5;
+        }
+
+        .controls button {
+            padding: 6px 12px;
+            border: 1px solid #e5e5e5;
+            background: white;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .controls button:hover {
+            background: #f5f5f5;
+            border-color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>🎯 Talk2Publish Test Chat</h1>
+            <p>Testing agents API at http://localhost:8000</p>
+            <div class="thread-info" id="threadInfo">No thread yet</div>
+        </div>
+
+        <div class="controls">
+            <button onclick="clearChat()">🗑️ Clear Chat</button>
+            <button onclick="newThread()">🔄 New Thread</button>
+        </div>
+
+        <div class="messages-container" id="messagesContainer">
+            <div class="status-message info">
+                👋 Welcome! Start a conversation to test the Talk2Publish agents.
+            </div>
+        </div>
+
+        <div class="input-container">
+            <div class="input-wrapper">
+                <textarea
+                    id="messageInput"
+                    placeholder="Type your message here... (Ctrl+Enter to send)"
+                    rows="1"
+                ></textarea>
+                <button id="sendButton" onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        let messages = [];
+        let threadId = null;
+        let isStreaming = false;
+
+        // Auto-resize textarea
+        const messageInput = document.getElementById('messageInput');
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        });
+
+        // Send on Ctrl+Enter
+        messageInput.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        function addMessage(role, content, metadata = {}) {
+            const message = {
+                id: Date.now() + Math.random(),
+                role,
+                content,
+                timestamp: new Date(),
+                metadata
+            };
+            messages.push(message);
+            renderMessage(message);
+            scrollToBottom();
+        }
+
+        function renderMessage(message) {
+            const container = document.getElementById('messagesContainer');
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${message.role}`;
+
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+
+            let content = '';
+
+            if (message.metadata.agent) {
+                content += `<div class="agent-badge">${message.metadata.agent}</div>`;
+            }
+
+            content += `<div>${escapeHtml(message.content)}</div>`;
+            content += `<div class="message-meta">${formatTime(message.timestamp)}</div>`;
+
+            bubble.innerHTML = content;
+            messageDiv.appendChild(bubble);
+
+            // Remove info messages when first real message arrives
+            const infoMessages = container.querySelectorAll('.status-message');
+            infoMessages.forEach(msg => msg.remove());
+
+            container.appendChild(messageDiv);
+        }
+
+        function showStreamingIndicator() {
+            const container = document.getElementById('messagesContainer');
+            const indicator = document.createElement('div');
+            indicator.id = 'streamingIndicator';
+            indicator.className = 'message assistant';
+            indicator.innerHTML = `
+                <div class="streaming-indicator active">
+                    <div class="typing-dots">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                    <span style="font-size: 13px; color: #666;">Thinking...</span>
+                </div>
+            `;
+            container.appendChild(indicator);
+            scrollToBottom();
+        }
+
+        function hideStreamingIndicator() {
+            const indicator = document.getElementById('streamingIndicator');
+            if (indicator) {
+                indicator.remove();
+            }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const content = input.value.trim();
+
+            if (!content || isStreaming) return;
+
+            // Add user message
+            addMessage('user', content);
+            input.value = '';
+            input.style.height = 'auto';
+
+            // Update UI state
+            isStreaming = true;
+            document.getElementById('sendButton').disabled = true;
+            showStreamingIndicator();
+
+            try {
+                // Prepare request payload
+                const payload = {
+                    messages: messages.map(m => ({
+                        role: m.role,
+                        content: m.content
+                    }))
+                };
+
+                if (threadId) {
+                    payload.thread_id = threadId;
+                }
+
+                // Call API
+                const response = await fetch(`${API_URL}/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+
+                // Update thread ID
+                if (data.thread_id) {
+                    threadId = data.thread_id;
+                    updateThreadInfo();
+                }
+
+                // Hide streaming indicator
+                hideStreamingIndicator();
+
+                // Add assistant messages
+                const assistantMessages = data.messages.filter(m => m.role === 'assistant');
+                assistantMessages.forEach(msg => {
+                    addMessage('assistant', msg.content, { agent: 'Orchestrator' });
+                });
+
+                if (assistantMessages.length === 0) {
+                    showError('No response from assistant');
+                }
+
+            } catch (error) {
+                console.error('Error sending message:', error);
+                hideStreamingIndicator();
+                showError(`Failed to send message: ${error.message}`);
+            } finally {
+                isStreaming = false;
+                document.getElementById('sendButton').disabled = false;
+                messageInput.focus();
+            }
+        }
+
+        function showError(message) {
+            const container = document.getElementById('messagesContainer');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'status-message error';
+            errorDiv.textContent = `❌ ${message}`;
+            container.appendChild(errorDiv);
+            scrollToBottom();
+        }
+
+        function updateThreadInfo() {
+            const info = document.getElementById('threadInfo');
+            if (threadId) {
+                info.textContent = `Thread ID: ${threadId}`;
+            } else {
+                info.textContent = 'No thread yet';
+            }
+        }
+
+        function clearChat() {
+            if (!confirm('Clear all messages?')) return;
+
+            messages = [];
+            const container = document.getElementById('messagesContainer');
+            container.innerHTML = `
+                <div class="status-message info">
+                    Chat cleared. Start a new conversation!
+                </div>
+            `;
+        }
+
+        function newThread() {
+            if (!confirm('Start a new thread? This will reset the conversation context.')) return;
+
+            threadId = null;
+            messages = [];
+            updateThreadInfo();
+            const container = document.getElementById('messagesContainer');
+            container.innerHTML = `
+                <div class="status-message info">
+                    New thread started. Your previous conversation context has been reset.
+                </div>
+            `;
+        }
+
+        function scrollToBottom() {
+            const container = document.getElementById('messagesContainer');
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML.replace(/\n/g, '<br>');
+        }
+
+        function formatTime(date) {
+            return date.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        // Focus input on load
+        window.addEventListener('load', () => {
+            messageInput.focus();
+        });
+
+        // Test API connection on load
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch(`${API_URL}/health`);
+                if (response.ok) {
+                    console.log('✅ API connection successful');
+                }
+            } catch (error) {
+                showError('Cannot connect to API. Make sure the server is running at http://localhost:8000');
+            }
+        });
+    </script>
+</body>
+</html>
