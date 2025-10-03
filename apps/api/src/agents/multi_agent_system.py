@@ -52,6 +52,10 @@ class BookAgentState(TypedDict, total=False):
     audience_questions_asked: int
 
     # Title generation
+    title_questions_asked: int
+    book_genre: str
+    key_themes: str
+    title_tone: str
     final_title: str
 
     # Planning
@@ -241,32 +245,50 @@ You are the Empath agent for Talk2Publish. Your role is to deeply understand the
 
 def title_generator_node(state: BookAgentState) -> Command[Literal["planner", END]]:
     """
-    Title Generator agent - Creates compelling book titles using gap analysis.
+    Title Generator agent - Creates compelling book titles through guided questions.
 
     Workflow:
-    1. Analyze book concept, author, and audience
-    2. Use gap_analysis tool to generate title options
-    3. Present titles and get user selection
-    4. Transition to Planner
+    1. Ask about book genre/category
+    2. Ask about key themes
+    3. Ask about desired tone
+    4. Generate 5 title options based on collected information
+    5. Get user selection and finalize
+    6. Transition to Planner
     """
     model = get_model()
 
-    system_prompt = """
+    # Load title generator config from database
+    agent_configs = load_agent_configs()
+    title_config = agent_configs.get("title_generator", {})
+
+    system_prompt = title_config.get("prompt", """
 You are the Title Generator for Talk2Publish. Your role is to create compelling book titles.
 
 **Your responsibilities:**
-1. Analyze the book concept, author background, and target audience
-2. Generate 5 compelling title options
-3. Present titles with brief explanations
-4. Get user's selection or feedback
-5. Finalize the chosen title
+1. Ask 3 questions ONE AT A TIME to understand title requirements:
+   - Question 1: "What genre or category best describes your book? (e.g., self-help, business, memoir, technical)"
+   - Question 2: "What are the key themes or main topics you want to cover?"
+   - Question 3: "What tone would you like for the title? (e.g., inspiring, professional, provocative, practical)"
+
+2. After collecting all answers, generate 5 compelling title options
+3. Present titles as a numbered list with brief explanations
+4. Get user's selection
+
+**Guidelines:**
+- Ask ONE question at a time
+- Wait for the user's response before asking the next question
+- After all 3 questions, generate exactly 5 title options
+- Present titles clearly with numbers for easy selection
 
 **When you have the final title, say:**
 "Perfect! Your book title is set. Let me bring in our Planner to structure your book's content."
+""")
 
-Note: Gap analysis tool will be re-enabled in a future update.
-"""
-
+    # Check what information we have
+    title_questions_asked = state.get("title_questions_asked", 0)
+    has_genre = bool(state.get("book_genre"))
+    has_themes = bool(state.get("key_themes"))
+    has_tone = bool(state.get("title_tone"))
     has_final_title = bool(state.get("final_title"))
 
     # If we have final title, transition to Planner
@@ -283,11 +305,9 @@ Note: Gap analysis tool will be re-enabled in a future update.
             goto="planner"
         )
 
-    # Create title options
-    # Note: Tool calling removed temporarily - will be re-implemented with proper execution loop
+    # Continue asking questions or generate titles
     from langchain_core.messages import SystemMessage
     messages_for_model = [SystemMessage(content=system_prompt)] + state.get("messages", [])
-
     response = model.invoke(messages_for_model)
 
     updates = {
@@ -296,10 +316,26 @@ Note: Gap analysis tool will be re-enabled in a future update.
         "stage": "title_generator"
     }
 
-    # Check if user selected a title
+    # Extract information from last user message
     last_user_message = next((m.content for m in reversed(state.get("messages", [])) if isinstance(m, HumanMessage)), "")
-    if "option" in last_user_message.lower() or "title" in last_user_message.lower():
-        updates["final_title"] = last_user_message
+
+    # Track question progress and extract answers
+    if last_user_message and len(last_user_message.split()) > 2:
+        if title_questions_asked < 3:
+            updates["title_questions_asked"] = title_questions_asked + 1
+
+            # Extract specific answers based on question number
+            if not has_genre and title_questions_asked == 0:
+                updates["book_genre"] = last_user_message
+            elif not has_themes and title_questions_asked == 1:
+                updates["key_themes"] = last_user_message
+            elif not has_tone and title_questions_asked == 2:
+                updates["title_tone"] = last_user_message
+
+    # Check if user selected a title from the options
+    if has_genre and has_themes and has_tone:
+        if "option" in last_user_message.lower() or any(word in last_user_message.lower() for word in ["choose", "select", "pick", "like"]):
+            updates["final_title"] = last_user_message
 
     return Command(update=updates, goto=END)
 
