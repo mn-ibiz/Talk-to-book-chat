@@ -1131,6 +1131,16 @@
                 }
             }
 
+            // Match "Theme: ..." pattern (can be multi-line, but not questions)
+            const themeMatch = content.match(/\*\*Theme:\*\*\s*(.+?)(?:\n\n|\n\*\*|$)/is);
+            if (themeMatch) {
+                const value = themeMatch[1].trim();
+                // Only extract if it's not a question
+                if (!value.includes('?')) {
+                    bookDetails.bookTheme = value;
+                }
+            }
+
             // Match "Audience Profile: ..." pattern (can be multi-line, but not questions)
             const audienceProfileMatch = content.match(/\*\*Audience Profile:\*\*\s*(.+?)(?:\n\n|\n\*\*|$)/is);
             if (audienceProfileMatch) {
@@ -1161,13 +1171,16 @@
 
                 // Update or add book details
                 if (bookDetails.bookName) {
-                    updateBookDetail('bookName', '📚 Book Name', bookDetails.bookName);
+                    updateBookDetail('bookName', '📚 Working Title', bookDetails.bookName);
                 }
                 if (bookDetails.authorName) {
                     updateBookDetail('authorName', '✍️ Author', bookDetails.authorName);
                 }
                 if (bookDetails.authorBio) {
                     updateBookDetail('authorBio', '📝 Author Bio', bookDetails.authorBio);
+                }
+                if (bookDetails.bookTheme) {
+                    updateBookDetail('bookTheme', '💡 Theme', bookDetails.bookTheme);
                 }
                 if (bookDetails.audienceProfile) {
                     updateBookDetail('audienceProfile', '🎯 Audience Profile', bookDetails.audienceProfile);
