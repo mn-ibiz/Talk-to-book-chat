@@ -26,14 +26,29 @@ from ..tools.persistence import save_chapter_draft, save_chapter_transcript, sav
 from .loader import load_agent_configs
 from ..core.config import settings
 
+# Global cached instances for performance
+_model_instance = None
+_agent_configs_cache = None
+
 
 def get_model():
-    """Get configured ChatAnthropic model instance."""
-    return ChatAnthropic(
-        model="claude-sonnet-4-20250514",
-        anthropic_api_key=settings.anthropic_api_key,
-        max_tokens=64000
-    )
+    """Get cached ChatAnthropic model instance (created once, reused for performance)."""
+    global _model_instance
+    if _model_instance is None:
+        _model_instance = ChatAnthropic(
+            model="claude-sonnet-4-20250514",
+            anthropic_api_key=settings.anthropic_api_key,
+            max_tokens=64000
+        )
+    return _model_instance
+
+
+def get_agent_configs():
+    """Get cached agent configurations (loaded once from DB, reused for performance)."""
+    global _agent_configs_cache
+    if _agent_configs_cache is None:
+        _agent_configs_cache = load_agent_configs()
+    return _agent_configs_cache
 
 
 class BookAgentState(TypedDict, total=False):
@@ -83,8 +98,8 @@ def biographer_node(state: BookAgentState) -> Command[Literal["empath", END]]:
     """
     model = get_model()
 
-    # Load biographer config from database
-    agent_configs = load_agent_configs()
+    # Get cached biographer config (faster than DB lookup)
+    agent_configs = get_agent_configs()
     biographer_config = agent_configs.get("biographer", {})
 
     system_prompt = biographer_config.get("prompt", """
@@ -115,8 +130,9 @@ You are the Biographer agent for Talk2Publish. Your role is to collect essential
 
     # If we have all information, transition to Empath
     if has_book_name and has_author_name and has_author_bio and has_book_theme:
+        # Fast transition with minimal message
         transition_message = AIMessage(
-            content=f"Perfect! Here's what we have:\n- **Working Title:** {state['book_name']}\n- **Author:** {state['author_name']}\n- **Bio:** {state['author_bio']}\n- **Theme:** {state['book_theme']}\n\n🔄 Let me connect you with our **Empath specialist** who will help define your target audience."
+            content=f"🔄 Connecting with **Empath specialist** for audience profiling..."
         )
         return Command(
             update={
@@ -171,8 +187,8 @@ def empath_node(state: BookAgentState) -> Command[Literal["title_generator", END
     """
     model = get_model()
 
-    # Load empath config from database
-    agent_configs = load_agent_configs()
+    # Get cached empath config (faster than DB lookup)
+    agent_configs = get_agent_configs()
     empath_config = agent_configs.get("empath", {})
 
     system_prompt = empath_config.get("prompt", """
@@ -204,8 +220,9 @@ You are the Empath agent for Talk2Publish. Your role is to deeply understand the
 
     # If we have complete audience profile, transition to Title Generator
     if has_audience_profile:
+        # Fast transition with minimal message
         transition_message = AIMessage(
-            content=f"Perfect! Here's your audience profile:\n\n{state['audience_profile']}\n\n🔄 Let me bring in our **Title Generator** to create a compelling book title."
+            content=f"🔄 Connecting with **Title Generator**..."
         )
         return Command(
             update={
@@ -258,8 +275,8 @@ def title_generator_node(state: BookAgentState) -> Command[Literal["planner", EN
     """
     model = get_model()
 
-    # Load title generator config from database
-    agent_configs = load_agent_configs()
+    # Get cached title generator config (faster than DB lookup)
+    agent_configs = get_agent_configs()
     title_config = agent_configs.get("title_generator", {})
 
     system_prompt = title_config.get("prompt", """
@@ -291,8 +308,9 @@ You are the Title Generator for Talk2Publish. Your role is to create compelling 
 
     # If we have final title, transition to Planner
     if has_final_title:
+        # Fast transition with minimal message
         transition_message = AIMessage(
-            content=f"Excellent! Your book title: **{state['final_title']}**\n\n🔄 Let me bring in our **Planner** to create your book outline and chapter structure."
+            content=f"🔄 Connecting with **Planner** for book structure..."
         )
         return Command(
             update={
@@ -306,8 +324,9 @@ You are the Title Generator for Talk2Publish. Your role is to create compelling 
     # If user doesn't want title suggestions, use working title and transition to Planner
     if wants_title_suggestions is False:
         working_title = state.get("book_name", "Untitled")
+        # Fast transition with minimal message
         transition_message = AIMessage(
-            content=f"No problem! We'll use your working title: **{working_title}**\n\n🔄 Let me bring in our **Planner** to create your book outline and chapter structure."
+            content=f"🔄 Connecting with **Planner** for book structure..."
         )
         return Command(
             update={
@@ -364,8 +383,8 @@ def planner_node(state: BookAgentState) -> Command[Literal["writer", END]]:
     """
     model = get_model()
 
-    # Load planner config from database
-    agent_configs = load_agent_configs()
+    # Get cached planner config (faster than DB lookup)
+    agent_configs = get_agent_configs()
     planner_config = agent_configs.get("planner", {})
 
     system_prompt = planner_config.get("prompt", """
@@ -392,8 +411,9 @@ You are the Planner agent for Talk2Publish. Your role is to structure the book's
 
     # If we have approved book plan, transition to Writer
     if has_book_plan:
+        # Fast transition with minimal message
         transition_message = AIMessage(
-            content=f"Perfect! Your book plan is finalized.\n\n🔄 Let me bring in our **Writer** to start creating content for your chapters."
+            content=f"🔄 Connecting with **Writer** for content creation..."
         )
         return Command(
             update={
