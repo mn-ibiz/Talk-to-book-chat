@@ -309,16 +309,19 @@ async def chat_stream(request: ChatRequest):
                             if hasattr(latest_msg, "type") and latest_msg.type == "ai":
                                 content = extract_text_content(latest_msg.content)
 
-                                # Format as SSE event
-                                event_data = {
-                                    "type": "message",
-                                    "role": "assistant",
-                                    "content": content,
-                                    "agent": current_agent or node_name.title(),
-                                    "thread_id": thread_id
-                                }
+                                # Only send non-empty messages
+                                if content and content.strip():
+                                    # Format as SSE event
+                                    # Use node_name for attribution (not current_agent) to avoid attribution bugs
+                                    event_data = {
+                                        "type": "message",
+                                        "role": "assistant",
+                                        "content": content,
+                                        "agent": node_name.title(),  # Use node_name instead of current_agent
+                                        "thread_id": thread_id
+                                    }
 
-                                yield f"data: {json.dumps(event_data)}\n\n"
+                                    yield f"data: {json.dumps(event_data)}\n\n"
 
                 # Send completion event
                 completion_data = {

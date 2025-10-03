@@ -16,13 +16,24 @@ Key improvements over task-tool architecture:
 from typing import TypedDict, Annotated, Literal
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.types import Command, interrupt
+from langgraph.types import Command
 from langchain_core.messages import HumanMessage, AIMessage
+from langchain_anthropic import ChatAnthropic
 import operator
 
-from .tools import gap_analysis, save_chapter_draft, save_chapter_transcript, save_hitl_clarifications
+from ..tools.gap_analysis import gap_analysis
+from ..tools.persistence import save_chapter_draft, save_chapter_transcript, save_hitl_clarifications
 from .loader import load_agent_configs
-from .model import get_model
+from ..core.config import settings
+
+
+def get_model():
+    """Get configured ChatAnthropic model instance."""
+    return ChatAnthropic(
+        model="claude-sonnet-4-20250514",
+        anthropic_api_key=settings.anthropic_api_key,
+        max_tokens=64000
+    )
 
 
 class BookAgentState(TypedDict, total=False):
@@ -245,13 +256,15 @@ You are the Title Generator for Talk2Publish. Your role is to create compelling 
 
 **Your responsibilities:**
 1. Analyze the book concept, author background, and target audience
-2. Use the gap_analysis tool to generate 5 title options
+2. Generate 5 compelling title options
 3. Present titles with brief explanations
 4. Get user's selection or feedback
 5. Finalize the chosen title
 
 **When you have the final title, say:**
 "Perfect! Your book title is set. Let me bring in our Planner to structure your book's content."
+
+Note: Gap analysis tool will be re-enabled in a future update.
 """
 
     has_final_title = bool(state.get("final_title"))
@@ -270,13 +283,12 @@ You are the Title Generator for Talk2Publish. Your role is to create compelling 
             goto="planner"
         )
 
-    # Create title options using gap_analysis
+    # Create title options
+    # Note: Tool calling removed temporarily - will be re-implemented with proper execution loop
     from langchain_core.messages import SystemMessage
     messages_for_model = [SystemMessage(content=system_prompt)] + state.get("messages", [])
 
-    # Bind gap_analysis tool to model
-    model_with_tools = model.bind_tools([gap_analysis])
-    response = model_with_tools.invoke(messages_for_model)
+    response = model.invoke(messages_for_model)
 
     updates = {
         "messages": [response],
@@ -387,7 +399,6 @@ You are the Writer agent for Talk2Publish. Your role is to co-create book chapte
 2. Interview the author about the chapter topic
 3. Generate chapter drafts based on the conversation
 4. Iterate based on feedback
-5. Use save_chapter_draft and save_chapter_transcript tools to save approved content
 
 **Guidelines:**
 - Be collaborative and creative
@@ -395,22 +406,13 @@ You are the Writer agent for Talk2Publish. Your role is to co-create book chapte
 - Generate content that matches the author's voice
 - Iterate until the chapter meets quality standards
 
-Available tools:
-- save_chapter_draft: Save approved chapter content
-- save_chapter_transcript: Save interview transcript
-- save_hitl_clarifications: Save clarifications for future reference
+Note: Chapter saving tools will be re-enabled in a future update.
 """
 
-    # Bind tools to model
-    model_with_tools = model.bind_tools([
-        save_chapter_draft,
-        save_chapter_transcript,
-        save_hitl_clarifications
-    ])
-
+    # Tool calling removed temporarily - will be re-implemented with proper execution loop
     from langchain_core.messages import SystemMessage
     messages_for_model = [SystemMessage(content=system_prompt)] + state.get("messages", [])
-    response = model_with_tools.invoke(messages_for_model)
+    response = model.invoke(messages_for_model)
 
     updates = {
         "messages": [response],
