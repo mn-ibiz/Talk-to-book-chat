@@ -42,20 +42,18 @@ class BookAgentState(TypedDict, total=False):
     # Current active agent (for UI display and routing)
     active_agent: str
 
-    # Book information
-    book_name: str
+    # Book information (collected by Biographer)
+    book_name: str  # Working/internal title
     author_name: str
     author_bio: str
+    book_theme: str  # Key topics/themes - collected early in workflow
 
-    # Audience information
+    # Audience information (collected by Empath)
     audience_profile: str
     audience_questions_asked: int
 
     # Title generation
-    title_questions_asked: int
-    book_genre: str
-    key_themes: str
-    title_tone: str
+    wants_title_suggestions: bool  # Whether user wants title suggestions
     final_title: str
 
     # Planning
@@ -73,14 +71,15 @@ class BookAgentState(TypedDict, total=False):
 
 def biographer_node(state: BookAgentState) -> Command[Literal["empath", END]]:
     """
-    Biographer agent - Collects book name, author name, and author bio.
+    Biographer agent - Collects book name, author details, and book theme.
 
     Workflow:
     1. Greet user and introduce Talk2Publish
-    2. Ask for book name
+    2. Ask for internal/working book name
     3. Ask for author name
     4. Ask for author bio
-    5. Transition to Empath for audience profiling
+    5. Ask for book theme (key topics)
+    6. Transition to Empath for audience profiling
     """
     model = get_model()
 
@@ -93,29 +92,31 @@ You are the Biographer agent for Talk2Publish. Your role is to collect essential
 
 **Your responsibilities:**
 1. Greet the user warmly and introduce the Talk2Publish system
-2. Ask for the book name
+2. Ask for the internal/working book name (explain this is temporary and will be refined later)
 3. Ask for the author's name
 4. Ask for a brief author bio (2-3 sentences)
+5. Ask for the book theme (what key topics or themes will the book cover?)
 
 **Guidelines:**
 - Be conversational and friendly
-- Ask one question at a time
+- Ask ONE question at a time
 - Validate that information is provided before moving on
-- Once you have all three pieces of information, announce transition to Empath
+- Once you have all FOUR pieces of information, announce transition to Empath
 
 **When you have all information, say:**
-"Great! I have all the book and author details. Let me connect you with our Empath specialist who will help define your target audience."
+"Perfect! I have all the essential details. Let me connect you with our Empath specialist who will help define your target audience."
 """)
 
     # Check what information we have
     has_book_name = bool(state.get("book_name"))
     has_author_name = bool(state.get("author_name"))
     has_author_bio = bool(state.get("author_bio"))
+    has_book_theme = bool(state.get("book_theme"))
 
     # If we have all information, transition to Empath
-    if has_book_name and has_author_name and has_author_bio:
+    if has_book_name and has_author_name and has_author_bio and has_book_theme:
         transition_message = AIMessage(
-            content=f"Perfect! We have:\n- Book: **{state['book_name']}**\n- Author: **{state['author_name']}**\n- Bio: {state['author_bio']}\n\n🔄 Let me connect you with our **Empath specialist** who will help define your target audience."
+            content=f"Perfect! Here's what we have:\n- **Working Title:** {state['book_name']}\n- **Author:** {state['author_name']}\n- **Bio:** {state['author_bio']}\n- **Theme:** {state['book_theme']}\n\n🔄 Let me connect you with our **Empath specialist** who will help define your target audience."
         )
         return Command(
             update={
@@ -142,12 +143,14 @@ You are the Biographer agent for Talk2Publish. Your role is to collect essential
     }
 
     # Simple extraction logic (can be enhanced with structured output)
-    if not has_book_name and ("book" in last_user_message.lower() or "title" in last_user_message.lower()):
+    if not has_book_name and len(last_user_message.split()) > 0:
         updates["book_name"] = last_user_message
-    elif not has_author_name and ("name" in last_user_message.lower() or "author" in last_user_message.lower()):
+    elif not has_author_name and has_book_name and len(last_user_message.split()) > 0:
         updates["author_name"] = last_user_message
-    elif not has_author_bio and ("bio" in last_user_message.lower() or len(last_user_message.split()) > 10):
+    elif not has_author_bio and has_author_name and len(last_user_message.split()) > 5:
         updates["author_bio"] = last_user_message
+    elif not has_book_theme and has_author_bio and len(last_user_message.split()) > 3:
+        updates["book_theme"] = last_user_message
 
     # Return and wait for next user message (END means wait for resume)
     return Command(update=updates, goto=END)
@@ -245,15 +248,13 @@ You are the Empath agent for Talk2Publish. Your role is to deeply understand the
 
 def title_generator_node(state: BookAgentState) -> Command[Literal["planner", END]]:
     """
-    Title Generator agent - Creates compelling book titles through guided questions.
+    Title Generator agent - Creates compelling book titles using collected information.
 
     Workflow:
-    1. Ask about book genre/category
-    2. Ask about key themes
-    3. Ask about desired tone
-    4. Generate 5 title options based on collected information
-    5. Get user selection and finalize
-    6. Transition to Planner
+    1. Ask if user wants title suggestions
+    2. If yes, generate 5 title options using book_theme and audience_profile
+    3. Get user selection and finalize
+    4. Transition to Planner
     """
     model = get_model()
 
@@ -265,36 +266,33 @@ def title_generator_node(state: BookAgentState) -> Command[Literal["planner", EN
 You are the Title Generator for Talk2Publish. Your role is to create compelling book titles.
 
 **Your responsibilities:**
-1. Ask 3 questions ONE AT A TIME to understand title requirements:
-   - Question 1: "What genre or category best describes your book? (e.g., self-help, business, memoir, technical)"
-   - Question 2: "What are the key themes or main topics you want to cover?"
-   - Question 3: "What tone would you like for the title? (e.g., inspiring, professional, provocative, practical)"
-
-2. After collecting all answers, generate 5 compelling title options
-3. Present titles as a numbered list with brief explanations
-4. Get user's selection
+1. First, ask the user if they would like title suggestions for their book
+2. If they say yes, generate 5 compelling title options based on:
+   - The book theme they provided earlier
+   - The target audience profile
+   - The author's background and expertise
+3. Present titles as a numbered list (1-5) with brief explanations
+4. Get user's selection from the options
 
 **Guidelines:**
-- Ask ONE question at a time
-- Wait for the user's response before asking the next question
-- After all 3 questions, generate exactly 5 title options
+- Start by asking: "Would you like me to suggest some title options for your book?"
+- If yes, generate exactly 5 professional title options
 - Present titles clearly with numbers for easy selection
+- Each title should resonate with the target audience
+- If they say no, you can transition to Planner
 
 **When you have the final title, say:**
-"Perfect! Your book title is set. Let me bring in our Planner to structure your book's content."
+"Perfect! Your book title is set. Let me bring in our Planner to create your book outline and chapter structure."
 """)
 
     # Check what information we have
-    title_questions_asked = state.get("title_questions_asked", 0)
-    has_genre = bool(state.get("book_genre"))
-    has_themes = bool(state.get("key_themes"))
-    has_tone = bool(state.get("title_tone"))
+    wants_title_suggestions = state.get("wants_title_suggestions")
     has_final_title = bool(state.get("final_title"))
 
     # If we have final title, transition to Planner
     if has_final_title:
         transition_message = AIMessage(
-            content=f"Excellent! Your book title: **{state['final_title']}**\n\n🔄 Let me bring in our **Planner** to structure your book's content."
+            content=f"Excellent! Your book title: **{state['final_title']}**\n\n🔄 Let me bring in our **Planner** to create your book outline and chapter structure."
         )
         return Command(
             update={
@@ -305,7 +303,23 @@ You are the Title Generator for Talk2Publish. Your role is to create compelling 
             goto="planner"
         )
 
-    # Continue asking questions or generate titles
+    # If user doesn't want title suggestions, use working title and transition to Planner
+    if wants_title_suggestions is False:
+        working_title = state.get("book_name", "Untitled")
+        transition_message = AIMessage(
+            content=f"No problem! We'll use your working title: **{working_title}**\n\n🔄 Let me bring in our **Planner** to create your book outline and chapter structure."
+        )
+        return Command(
+            update={
+                "messages": [transition_message],
+                "active_agent": "Planner",
+                "stage": "planner",
+                "final_title": working_title
+            },
+            goto="planner"
+        )
+
+    # Continue with title generation workflow
     from langchain_core.messages import SystemMessage
     messages_for_model = [SystemMessage(content=system_prompt)] + state.get("messages", [])
     response = model.invoke(messages_for_model)
@@ -319,22 +333,19 @@ You are the Title Generator for Talk2Publish. Your role is to create compelling 
     # Extract information from last user message
     last_user_message = next((m.content for m in reversed(state.get("messages", [])) if isinstance(m, HumanMessage)), "")
 
-    # Track question progress and extract answers
-    if last_user_message and len(last_user_message.split()) > 2:
-        if title_questions_asked < 3:
-            updates["title_questions_asked"] = title_questions_asked + 1
-
-            # Extract specific answers based on question number
-            if not has_genre and title_questions_asked == 0:
-                updates["book_genre"] = last_user_message
-            elif not has_themes and title_questions_asked == 1:
-                updates["key_themes"] = last_user_message
-            elif not has_tone and title_questions_asked == 2:
-                updates["title_tone"] = last_user_message
+    # Check if user wants title suggestions (if not already set)
+    if wants_title_suggestions is None and last_user_message:
+        last_lower = last_user_message.lower()
+        if any(word in last_lower for word in ["yes", "yeah", "sure", "ok", "okay", "please", "would like"]):
+            updates["wants_title_suggestions"] = True
+        elif any(word in last_lower for word in ["no", "nope", "not", "don't"]):
+            updates["wants_title_suggestions"] = False
 
     # Check if user selected a title from the options
-    if has_genre and has_themes and has_tone:
-        if "option" in last_user_message.lower() or any(word in last_user_message.lower() for word in ["choose", "select", "pick", "like"]):
+    if wants_title_suggestions is True and last_user_message:
+        # Look for selection keywords or option numbers
+        if any(word in last_user_message.lower() for word in ["option", "choose", "select", "pick", "like", "prefer"]) or \
+           any(char.isdigit() for char in last_user_message):
             updates["final_title"] = last_user_message
 
     return Command(update=updates, goto=END)
