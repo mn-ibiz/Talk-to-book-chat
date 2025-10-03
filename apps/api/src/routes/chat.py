@@ -1,4 +1,4 @@
-"""Chat endpoint for conversational interaction with the orchestration agent."""
+"""Chat endpoint for conversational interaction with the multi-agent system."""
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -9,9 +9,20 @@ import uuid
 import json
 from functools import lru_cache
 
-from ..agents.orchestrator import get_orchestrator
+from ..agents.multi_agent_system import create_multi_agent_graph
 
 logger = logging.getLogger(__name__)
+
+# Global graph instance (created once and reused)
+_graph_instance = None
+
+
+def get_multi_agent_graph():
+    """Get or create the multi-agent graph instance."""
+    global _graph_instance
+    if _graph_instance is None:
+        _graph_instance = create_multi_agent_graph()
+    return _graph_instance
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -137,44 +148,39 @@ async def chat(request: ChatRequest):
 
         logger.info(f"Processing chat request for thread {thread_id}")
 
-        # Get orchestrator instance
-        orchestrator = get_orchestrator()
+        # Get multi-agent graph instance
+        graph = get_multi_agent_graph()
 
-        # Convert messages to LangGraph format
-        langgraph_messages = [
-            {"role": msg.role, "content": msg.content}
-            for msg in request.messages
-        ]
+        # Convert messages to LangChain format
+        from langchain_core.messages import HumanMessage, AIMessage
+        langgraph_messages = []
+        for msg in request.messages:
+            if msg.role == "user":
+                langgraph_messages.append(HumanMessage(content=msg.content))
+            else:
+                langgraph_messages.append(AIMessage(content=msg.content))
 
-        # Configure with thread_id and dynamic recursion limit based on workflow stage
-        recursion_limit = calculate_recursion_limit(langgraph_messages)
+        # Configure with thread_id
         config = {
             "configurable": {
                 "thread_id": thread_id
             },
-            "recursion_limit": recursion_limit  # Dynamic: 30 for simple, 50 for moderate, 100 for complex
+            "recursion_limit": 100
         }
 
-        logger.info(f"Using recursion_limit={recursion_limit} for thread {thread_id}")
+        logger.info(f"Using multi-agent graph for thread {thread_id}")
 
-        # Invoke the orchestrator
-        result = orchestrator.invoke(
+        # Invoke the multi-agent graph
+        result = graph.invoke(
             {"messages": langgraph_messages},
             config=config
         )
 
-        # Extract response messages - return only NEW assistant messages
-        # LangGraph returns full conversation history, but frontend already has user messages
-        # Track which messages we've seen by comparing against input count
+        # Extract response messages and active agent from state
         all_messages = result.get("messages", [])
-        input_count = len(langgraph_messages)
+        active_agent = result.get("active_agent", "Biographer")  # Get active agent from state
 
-        # Get only messages that came AFTER our input (the AI's new responses)
-        # Skip the conversation history and our input message(s)
-        new_messages = all_messages[-(len(all_messages) - len(all_messages) + input_count):] if len(all_messages) > input_count else []
-
-        # Actually, simpler approach: return only ASSISTANT messages from the LAST part of conversation
-        # This avoids sending back user messages that frontend already has
+        # Return only NEW assistant messages (those added after user's input)
         response_messages = []
 
         # Process messages in reverse to get only the newest assistant responses
@@ -192,34 +198,15 @@ async def chat(request: ChatRequest):
 
             # Only process assistant messages
             if msg_type == "ai" or msg.get("role") == "assistant":
-                # Handle both dict format and LangChain message objects
-                if hasattr(msg, "type"):
-                    # LangChain message object (HumanMessage, AIMessage, etc.)
-                    role = "assistant"
-                    content = extract_text_content(msg.content)
-
-                    # Extract agent name from message metadata
-                    agent_name = None
-                    if hasattr(msg, "name") and msg.name:
-                        agent_name = msg.name
-                    elif hasattr(msg, "additional_kwargs") and msg.additional_kwargs.get("agent"):
-                        agent_name = msg.additional_kwargs.get("agent")
-                else:
-                    # Dictionary format (fallback)
-                    role = "assistant"
-                    content = extract_text_content(msg.get("content", ""))
-                    agent_name = msg.get("agent")  # Extract agent from dict format
+                # Extract content
+                content = extract_text_content(msg.content)
 
                 # Only add messages with non-empty content
-                # (Skip tool-only messages that have no text)
                 if content and content.strip():
-                    # Use explicit agent name, or detect from content, or default to Orchestrator
-                    final_agent = agent_name if agent_name else detect_agent_from_content(content)
-
-                    response_messages.insert(0, Message(  # Insert at beginning to maintain order
-                        role=role,
+                    response_messages.insert(0, Message(
+                        role="assistant",
                         content=content,
-                        agent=final_agent
+                        agent=active_agent  # Use active_agent from state
                     ))
 
         logger.info(f"Successfully processed chat for thread {thread_id}")
@@ -259,73 +246,79 @@ async def chat_stream(request: ChatRequest):
         logger.info(f"Starting streaming chat for thread {thread_id}")
 
         async def event_generator() -> AsyncIterator[str]:
-            """Generate SSE events from orchestrator stream."""
+            """Generate SSE events from multi-agent graph stream."""
             try:
-                # Get orchestrator instance
-                orchestrator = get_orchestrator()
+                # Get multi-agent graph instance
+                graph = get_multi_agent_graph()
 
-                # Convert messages to LangGraph format
-                langgraph_messages = [
-                    {"role": msg.role, "content": msg.content}
-                    for msg in request.messages
-                ]
+                # Convert messages to LangChain format
+                from langchain_core.messages import HumanMessage, AIMessage
+                langgraph_messages = []
+                for msg in request.messages:
+                    if msg.role == "user":
+                        langgraph_messages.append(HumanMessage(content=msg.content))
+                    else:
+                        langgraph_messages.append(AIMessage(content=msg.content))
 
-                # Configure with thread_id and dynamic recursion limit
-                recursion_limit = calculate_recursion_limit(langgraph_messages)
+                # Configure with thread_id
                 config = {
                     "configurable": {
                         "thread_id": thread_id
                     },
-                    "recursion_limit": recursion_limit  # Dynamic: 30 for simple, 50 for moderate, 100 for complex
+                    "recursion_limit": 100
                 }
 
-                logger.info(f"Streaming with recursion_limit={recursion_limit} for thread {thread_id}")
+                logger.info(f"Streaming multi-agent graph for thread {thread_id}")
 
-                # Stream the orchestrator response
-                for event in orchestrator.stream(
+                # Track previous agent to detect transitions
+                previous_agent = None
+
+                # Stream the multi-agent graph response
+                # Use stream_mode="updates" to get node-level events
+                for event in graph.stream(
                     {"messages": langgraph_messages},
                     config=config,
-                    stream_mode="values"
+                    stream_mode="updates"
                 ):
-                    # Extract the latest message from event
-                    if "messages" in event and event["messages"]:
-                        latest_msg = event["messages"][-1]
+                    # Event format: {node_name: {state_updates}}
+                    for node_name, state_update in event.items():
+                        # Skip human node (waiting for input)
+                        if node_name == "human":
+                            continue
 
-                        # Handle both LangChain message objects and dictionaries
-                        if hasattr(latest_msg, "type"):
-                            # LangChain message object
-                            msg_type = latest_msg.type
-                            role = "assistant" if msg_type == "ai" else "user" if msg_type == "human" else msg_type
-                            content = extract_text_content(latest_msg.content)
+                        # Get active agent from state update
+                        current_agent = state_update.get("active_agent")
 
-                            # Extract agent name
-                            agent_name = None
-                            if hasattr(latest_msg, "name") and latest_msg.name:
-                                agent_name = latest_msg.name
-                            elif hasattr(latest_msg, "additional_kwargs") and latest_msg.additional_kwargs.get("agent"):
-                                agent_name = latest_msg.additional_kwargs.get("agent")
-
-                            # Detect agent from content if not explicitly set
-                            if not agent_name and role == "assistant":
-                                agent_name = detect_agent_from_content(content)
-                        else:
-                            # Dictionary format
-                            role = latest_msg.get("role", "assistant")
-                            content = extract_text_content(latest_msg.get("content", ""))
-                            agent_name = latest_msg.get("agent", "Orchestrator")
-
-                        # Only stream assistant messages (skip user messages)
-                        if role == "assistant":
-                            # Format as SSE event
-                            event_data = {
-                                "type": "message",
-                                "role": role,
-                                "content": content,
-                                "agent": agent_name or "Orchestrator",
+                        # Send transition event when agent changes
+                        if current_agent and current_agent != previous_agent:
+                            transition_data = {
+                                "type": "transition",
+                                "from_agent": previous_agent or "none",
+                                "to_agent": current_agent,
                                 "thread_id": thread_id
                             }
+                            yield f"data: {json.dumps(transition_data)}\n\n"
+                            previous_agent = current_agent
 
-                            yield f"data: {json.dumps(event_data)}\n\n"
+                        # Extract messages from state update
+                        if "messages" in state_update and state_update["messages"]:
+                            # Get the latest message
+                            latest_msg = state_update["messages"][-1]
+
+                            # Only stream AI messages
+                            if hasattr(latest_msg, "type") and latest_msg.type == "ai":
+                                content = extract_text_content(latest_msg.content)
+
+                                # Format as SSE event
+                                event_data = {
+                                    "type": "message",
+                                    "role": "assistant",
+                                    "content": content,
+                                    "agent": current_agent or node_name.title(),
+                                    "thread_id": thread_id
+                                }
+
+                                yield f"data: {json.dumps(event_data)}\n\n"
 
                 # Send completion event
                 completion_data = {

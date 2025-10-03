@@ -1,10 +1,10 @@
 """Agent loader service - Dynamically loads agent configurations from database.
 
 This module provides functionality to load active agent configurations from the
-database and transform them into deepagents SubAgent format.
+database and transform them into deepagents SubAgent format or simple config dictionaries.
 """
 
-from typing import List
+from typing import List, Dict
 from deepagents.types import SubAgent
 from ..database.repository import AgentPromptRepository
 from ..database.session import get_session
@@ -83,3 +83,42 @@ def load_subagent_by_name(agent_name: str) -> SubAgent:
             prompt.prompt_version
         )
         return subagent
+
+
+def load_agent_configs() -> Dict[str, Dict[str, str]]:
+    """Load all active agent configurations as a simple dictionary.
+
+    Used by multi_agent_system.py to load agent prompts for graph nodes.
+
+    Returns:
+        Dictionary mapping agent name (lowercase) to config dict with 'prompt' and 'description'
+
+    Example:
+        {
+            "biographer": {"prompt": "...", "description": "..."},
+            "empath": {"prompt": "...", "description": "..."},
+            ...
+        }
+    """
+    logger.info("Loading agent configs from database")
+
+    with get_session() as session:
+        repo = AgentPromptRepository(session)
+        active_prompts = repo.get_active_agents()
+
+        configs = {}
+        for prompt in active_prompts:
+            # Use lowercase agent name as key for consistent lookups
+            agent_key = prompt.agent_name.lower()
+            configs[agent_key] = {
+                "prompt": prompt.prompt_content,
+                "description": prompt.description
+            }
+            logger.debug(
+                "Loaded config for agent: %s (v%d)",
+                prompt.agent_name,
+                prompt.prompt_version
+            )
+
+        logger.info("Loaded %d agent configs", len(configs))
+        return configs
