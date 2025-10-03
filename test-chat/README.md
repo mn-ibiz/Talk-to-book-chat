@@ -29,8 +29,16 @@ Simple HTML chat interface for testing the Talk2Publish agents API.
 - ✅ Streaming indicator during API calls
 - ✅ Clear chat / New thread controls
 - ✅ Auto-resize input textarea
-- ✅ Keyboard shortcut (Ctrl+Enter to send)
-- ✅ Mobile-responsive design
+- ✅ **Keyboard shortcuts**:
+  - Enter to send message
+  - Shift+Enter for new line
+- ✅ **Key Points Sidebar**: Automatically extracts and displays:
+  - Bullet points
+  - Numbered steps
+  - Important highlights
+  - Questions from AI responses
+- ✅ Full-height ChatGPT-like interface
+- ✅ Mobile-responsive design with collapsible sidebar
 
 ## Testing Workflow
 

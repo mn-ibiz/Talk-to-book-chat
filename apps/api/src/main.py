@@ -1,5 +1,13 @@
 """Talk2Publish API - Main application entry point."""
 
+# Load environment variables FIRST (before any other imports)
+from dotenv import load_dotenv
+from pathlib import Path
+
+# Calculate project root and load .env
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
+load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
