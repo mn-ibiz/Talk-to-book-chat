@@ -103,21 +103,21 @@ def biographer_node(state: BookAgentState) -> Command[Literal["empath", END]]:
     biographer_config = agent_configs.get("biographer", {})
 
     system_prompt = biographer_config.get("prompt", """
-You are the Biographer for Talk2Publish. Collect book details efficiently.
+You are the Biographer for Talk2Publish. Get essential info in MAXIMUM 3 questions.
 
-**Collect (ONE question at a time):**
-1. Working title (explain it's temporary)
-2. Author name
-3. Author bio (2-3 sentences)
-4. Book theme (key topics)
+**Question Strategy (be smart, combine when possible):**
+1. "What's your working title?" (just the title, nothing else)
+2. "Tell me your name and a bit about your background/expertise" (extracts author name + bio)
+3. "What key topics will your book cover?" (gets theme)
 
-**Guidelines:**
-- Keep messages under 2 sentences
-- Be warm but brief
-- No explanations unless asked
-- Ask, wait, move on
+**Critical Rules:**
+- NEVER ask more than 3 questions total
+- Extract multiple info from single responses when user volunteers it
+- If user provides extra info, don't re-ask
+- Keep each question to 1 sentence max
+- No preambles or explanations
 
-**Once complete:** "All set! Connecting with Empath for audience profiling."
+**Once you have all 4 items (title, name, bio, theme):** Transition immediately.
 """)
 
     # Check what information we have
@@ -156,15 +156,40 @@ You are the Biographer for Talk2Publish. Collect book details efficiently.
         "stage": "biographer"
     }
 
-    # Simple extraction logic (can be enhanced with structured output)
-    if not has_book_name and len(last_user_message.split()) > 0:
-        updates["book_name"] = last_user_message
-    elif not has_author_name and has_book_name and len(last_user_message.split()) > 0:
-        updates["author_name"] = last_user_message
-    elif not has_author_bio and has_author_name and len(last_user_message.split()) > 5:
-        updates["author_bio"] = last_user_message
-    elif not has_book_theme and has_author_bio and len(last_user_message.split()) > 3:
-        updates["book_theme"] = last_user_message
+    # Smart extraction logic - extract multiple pieces from single response
+    if last_user_message:
+        # First response: usually just book name
+        if not has_book_name:
+            updates["book_name"] = last_user_message.strip()
+
+        # Second response: extract both name and bio if present
+        elif not has_author_name or not has_author_bio:
+            # Try to extract name (usually first part, shorter)
+            # and bio (usually longer explanation)
+            words = last_user_message.split()
+            if len(words) > 15:
+                # Long response likely contains both name and bio
+                # First few words likely the name
+                potential_name = ' '.join(words[:3])
+                potential_bio = last_user_message.strip()
+                if not has_author_name:
+                    updates["author_name"] = potential_name
+                if not has_author_bio:
+                    updates["author_bio"] = potential_bio
+            elif len(words) > 5:
+                # Medium response: likely bio or name only
+                if not has_author_name:
+                    updates["author_name"] = last_user_message.strip()
+                elif not has_author_bio:
+                    updates["author_bio"] = last_user_message.strip()
+            else:
+                # Short response: likely just name
+                if not has_author_name:
+                    updates["author_name"] = last_user_message.strip()
+
+        # Third response: theme
+        elif not has_book_theme:
+            updates["book_theme"] = last_user_message.strip()
 
     # Return and wait for next user message (END means wait for resume)
     return Command(update=updates, goto=END)
@@ -190,19 +215,20 @@ def empath_node(state: BookAgentState) -> Command[Literal["title_generator", END
     empath_config = agent_configs.get("empath", {})
 
     system_prompt = empath_config.get("prompt", """
-You are the Empath for Talk2Publish. Understand the target audience quickly.
+You are the Empath for Talk2Publish. Ask EXACTLY 3 questions about the audience, then synthesize.
 
-**Ask (maximum 3 questions, ONE at a time):**
-1. Who's your primary reader? (demographics, profession)
-2. What problems do they face?
-3. What transformation do they seek?
+**The 3 Questions (ask in order, ONE at a time):**
+1. "Who's your primary reader?"
+2. "What problems do they face?"
+3. "What transformation do they seek?"
 
-**Guidelines:**
-- 1 sentence per question
-- Be empathetic, not chatty
-- Synthesize profile after 3 questions
+**Critical Rules:**
+- EXACTLY 3 questions - no more, no less
+- 1 sentence per question, no preambles
+- After question 3, synthesize the profile immediately
+- Don't ask follow-ups or clarifications
 
-**Once complete:** "Got it! Connecting with Title Generator."
+**After 3rd answer:** Create **Audience Profile:** label and transition.
 """)
 
     # Count how many audience questions have been answered
@@ -271,19 +297,23 @@ def title_generator_node(state: BookAgentState) -> Command[Literal["planner", EN
     title_config = agent_configs.get("title_generator", {})
 
     system_prompt = title_config.get("prompt", """
-You are the Title Generator for Talk2Publish. Create compelling titles efficiently.
+You are the Title Generator for Talk2Publish. Maximum 2 interactions total.
 
-**Process:**
-1. Ask: "Want title suggestions?"
-2. If yes: Generate 5 options (numbered list, 1 sentence each)
-3. If no: Skip to Planner
+**Interaction 1:** "Want title suggestions?" (yes/no question only)
 
-**When generating:**
-- Use book theme + audience profile
-- Brief explanations (5-8 words max per title)
-- Numbered 1-5 for easy selection
+**Interaction 2 (if yes):**
+Present exactly 5 titles in this format:
+1. Title Name - 4-6 word explanation
+2. Title Name - 4-6 word explanation
+(etc.)
 
-**Once selected:** "Title confirmed! Connecting with Planner."
+**Critical Rules:**
+- NO preambles or explanations
+- NO asking which they prefer - they'll tell you
+- Just present the 5 options and wait
+- When they respond with a number/selection, transition immediately
+
+**If no suggestions wanted:** Use working title, transition immediately.
 """)
 
     # Check what information we have
@@ -372,19 +402,26 @@ def planner_node(state: BookAgentState) -> Command[Literal["writer", END]]:
     planner_config = agent_configs.get("planner", {})
 
     system_prompt = planner_config.get("prompt", """
-You are the Planner for Talk2Publish. Structure the book efficiently.
+You are the Planner for Talk2Publish. Present outline in 1 message, get approval, done.
 
-**Create:**
-1. Parts/sections (if needed)
-2. Chapter titles
-3. Brief chapter summaries (1 sentence each)
+**Your Task:**
+1. Create book outline with chapter titles (8-12 chapters typical)
+2. Add 1-sentence summary per chapter
+3. Present in clean numbered format
+4. Wait for approval (yes/no/changes)
 
-**Keep it:**
-- Concise (no lengthy explanations)
-- Clear (numbered/bulleted format)
-- Scannable (max 2-3 sentences intro)
+**Format Example:**
+Chapter 1: Title - One sentence summary
+Chapter 2: Title - One sentence summary
+(etc.)
 
-**Once approved:** "Plan finalized! Connecting with Writer."
+**Critical Rules:**
+- NO asking questions about structure
+- NO back-and-forth about preferences
+- Just present your expert recommendation
+- Maximum 2 interactions: present, get approval
+
+**Once approved:** Transition immediately.
 """)
 
     has_book_plan = bool(state.get("book_plan"))
@@ -439,20 +476,22 @@ def writer_node(state: BookAgentState) -> Command[Literal[END]]:
     model = get_model()
 
     system_prompt = """
-You are the Writer for Talk2Publish. Co-create chapters efficiently.
+You are the Writer for Talk2Publish. Create chapters with minimal friction.
 
-**Process:**
-1. Pick next chapter
-2. Ask focused questions (2-3 max)
-3. Generate draft
-4. Get feedback, iterate
+**Per Chapter:**
+1. Ask 2-3 focused questions max about the chapter topic
+2. Generate draft based on answers
+3. Get feedback (approve/revise)
+4. Iterate if needed
 
-**Keep it:**
-- Brief questions (1 sentence)
-- Focused interviews (no rambling)
-- Quick iterations
+**Critical Rules:**
+- Questions are 1 sentence max, no preambles
+- NO lengthy explanations about your process
+- NO asking about preferences - just write
+- Present drafts cleanly without meta-commentary
+- Maximum 3 questions before drafting
 
-Note: Chapter saving tools coming soon.
+**Goal:** Make writing feel effortless for the author.
 """
 
     # Tool calling removed temporarily - will be re-implemented with proper execution loop
